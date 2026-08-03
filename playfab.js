@@ -1,0 +1,85 @@
+// Minimal PlayFab Admin/Server API client.
+// The secret key NEVER leaves this file / this server. The frontend never sees it.
+
+const TITLE_ID = process.env.PLAYFAB_TITLE_ID;
+const SECRET_KEY = process.env.PLAYFAB_SECRET_KEY;
+const BASE_URL = `https://${TITLE_ID}.playfabapi.com`;
+
+async function pfCall(path, body) {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-SecretKey": SECRET_KEY,
+    },
+    body: JSON.stringify(body || {}),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    const msg = data?.errorMessage || `PlayFab error on ${path}`;
+    const err = new Error(msg);
+    err.playfab = data;
+    throw err;
+  }
+  return data.data;
+}
+
+// --- Auth (used by /auth/login to validate a client's session ticket) ---
+export function authenticateSessionTicket(sessionTicket) {
+  return pfCall("/Server/AuthenticateSessionTicket", { SessionTicket: sessionTicket });
+}
+
+// --- Stats ---
+// Requires a PlayFab segment already created in Game Manager, e.g. "All Players" and "Banned Players".
+export function getSegmentCount(segmentId) {
+  return pfCall("/Admin/GetPlayersInSegment", { SegmentId: segmentId, MaxBatchSize: 1 })
+    .then((d) => d.ProfilesInSegment);
+}
+
+// --- Player lookup ---
+export function getPlayerProfile(playFabId) {
+  return pfCall("/Server/GetPlayerProfile", {
+    PlayFabId: playFabId,
+    ProfileConstraints: { ShowDisplayName: true, ShowBannedUntil: true },
+  });
+}
+
+export function getUserAccountInfo(playFabId) {
+  return pfCall("/Server/GetUserAccountInfo", { PlayFabId: playFabId });
+}
+
+// --- Moderation actions ---
+export function banPlayer(playFabId, reason = "Banned via moddash") {
+  return pfCall("/Admin/BanUsers", {
+    Bans: [{ PlayFabId: playFabId, Reason: reason, Permanent: true }],
+  });
+}
+
+export function unbanPlayer(playFabId) {
+  return pfCall("/Admin/RevokeAllBansForUser", { PlayFabId: playFabId });
+}
+
+export function grantCurrency(playFabId, currencyCode, amount) {
+  return pfCall("/Server/AddUserVirtualCurrency", {
+    PlayFabId: playFabId,
+    VirtualCurrency: currencyCode,
+    Amount: amount,
+  });
+}
+
+// Grants an item (cosmetic) from the catalog to a player.
+export function grantCosmetic(playFabId, itemId) {
+  return pfCall("/Server/GrantItemsToUser", {
+    PlayFabId: playFabId,
+    CatalogVersion: undefined, // set if you use a named catalog version
+    ItemIds: [itemId],
+  });
+}
+
+export function revokeCosmetic(playFabId, itemInstanceId) {
+  return pfCall("/Server/RevokeInventoryItem", {
+    PlayFabId: playFabId,
+    ItemInstanceId: itemInstanceId,
+  });
+}
