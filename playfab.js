@@ -68,11 +68,11 @@ export function grantCurrency(playFabId, currencyCode, amount) {
   });
 }
 
-// Grants an item (cosmetic) from the catalog to a player.
+// Grants an item (cosmetic) from the DLC catalog to a player.
 export function grantCosmetic(playFabId, itemId) {
   return pfCall("/Server/GrantItemsToUser", {
     PlayFabId: playFabId,
-    CatalogVersion: undefined, // set if you use a named catalog version
+    CatalogVersion: "DLC",
     ItemIds: [itemId],
   });
 }
