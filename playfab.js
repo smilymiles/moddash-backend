@@ -15,7 +15,7 @@ async function pfCall(path, body) {
     body: JSON.stringify(body || {}),
   });
 
-  const raw = await res.json();
+  const raw = await res.text();
   if (!res.ok) {
     const msg = data?.errorMessage || `PlayFab error on ${path}`;
     const err = new Error(msg);
