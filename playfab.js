@@ -16,6 +16,15 @@ async function pfCall(path, body) {
   });
 
   const raw = await res.text();
+  let data;
+  try {
+    data = raw ? JSON.parse(raw) : {};
+  } catch (parseErr) {
+    throw new Error(
+      `PlayFab returned non-JSON response on ${path} (status ${res.status}): ${raw.slice(0, 300)}`
+    );
+  }
+
   if (!res.ok) {
     const msg = data?.errorMessage || `PlayFab error on ${path}`;
     const err = new Error(msg);
