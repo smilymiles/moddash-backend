@@ -50,14 +50,20 @@ export function getUserAccountInfo(playFabId) {
 }
 
 // --- Moderation actions ---
-export function banPlayer(playFabId, reason = "Banned via moddash") {
-  return pfCall("/Admin/BanUsers", {
+// Also tags the player "banned" so the "Banned Players" segment (Tag = banned)
+// actually reflects who's banned — PlayFab segments have no native ban-status filter.
+export async function banPlayer(playFabId, reason = "Banned via moddash") {
+  const result = await pfCall("/Admin/BanUsers", {
     Bans: [{ PlayFabId: playFabId, Reason: reason, Permanent: true }],
   });
+  await pfCall("/Server/AddPlayerTag", { PlayFabId: playFabId, TagName: "banned" });
+  return result;
 }
 
-export function unbanPlayer(playFabId) {
-  return pfCall("/Admin/RevokeAllBansForUser", { PlayFabId: playFabId });
+export async function unbanPlayer(playFabId) {
+  const result = await pfCall("/Admin/RevokeAllBansForUser", { PlayFabId: playFabId });
+  await pfCall("/Server/RemovePlayerTag", { PlayFabId: playFabId, TagName: "banned" });
+  return result;
 }
 
 export function grantCurrency(playFabId, currencyCode, amount) {
