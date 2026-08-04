@@ -4,6 +4,7 @@ import cors from "cors";
 import jwt from "jsonwebtoken";
 import * as playfab from "./playfab.js";
 import * as lobbyStore from "./lobbyStore.js";
+import * as statsStore from "./statsStore.js";
 
 const app = express();
 app.use(express.json());
@@ -54,34 +55,46 @@ function requireModAuth(req, res, next) {
 
 // ---------- Photon webhook (internal, not for the dashboard) ----------
 // Point your existing Photon room webhook config at POST /webhooks/photon.
+const seenPlayers = new Set();
+
 app.post("/webhooks/photon", (req, res) => {
   if (req.headers["x-webhook-secret"] !== process.env.PHOTON_WEBHOOK_SECRET) {
     return res.status(401).end();
   }
 
   const { event, lobbyCode, playFabId, username } = req.body;
-  if (event === "join") lobbyStore.playerJoined(lobbyCode, playFabId, username);
-  else if (event === "leave") lobbyStore.playerLeft(lobbyCode, playFabId);
+  if (event === "join") {
+    lobbyStore.playerJoined(lobbyCode, playFabId, username);
+    // Count each distinct player we've seen since this server started as a
+    // "total player" — rough, but tracks reality without a DB.
+    if (playFabId && !seenPlayers.has(playFabId)) {
+      seenPlayers.add(playFabId);
+      statsStore.recordNewPlayer();
+    }
+  } else if (event === "leave") lobbyStore.playerLeft(lobbyCode, playFabId);
   else if (event === "disconnect") lobbyStore.playerLeftAnyLobby(playFabId);
 
   res.status(204).end();
 });
 
-// ---------- Dashboard data ----------
-// Segment IDs (not names) — GetPlayersInSegment requires the actual segment ID
-// from Game Manager > Players > Segments > (segment) > the ID in the URL.
-const SEGMENT_ALL_PLAYERS = "3C8EF29251C15138";
-const SEGMENT_BANNED_PLAYERS = "52CF4D0367AAAAB4";
+// One-time (or occasional) manual seed so counts don't start at zero —
+// e.g. call this once with your real player/ban totals from wherever you
+// last had them (PlayFab's Data Explorer, an old export, a rough estimate).
+app.post("/stats/seed", requireModAuth, (req, res) => {
+  const { totalPlayers, bannedPlayers } = req.body || {};
+  statsStore.seedCounts({ totalPlayers, bannedPlayers });
+  res.json(statsStore.getCounts());
+});
 
+// ---------- Dashboard data ----------
+// Total/banned counts are tracked ourselves (see statsStore.js) — PlayFab's
+// GetPlayersInSegment API, which used to power this, was retired 3/31/2026.
 app.get("/stats", requireModAuth, async (req, res) => {
   try {
-    const [total, banned] = await Promise.all([
-      playfab.getSegmentCount(SEGMENT_ALL_PLAYERS),
-      playfab.getSegmentCount(SEGMENT_BANNED_PLAYERS),
-    ]);
+    const { totalPlayers, bannedPlayers } = statsStore.getCounts();
     res.json({
-      totalPlayers: total,
-      bannedPlayers: banned,
+      totalPlayers,
+      bannedPlayers,
       playersOnlineNow: lobbyStore.totalPlayersOnline(),
     });
   } catch (err) {
@@ -104,6 +117,7 @@ app.get("/lobbies/:code", requireModAuth, (req, res) => {
 app.post("/players/:id/ban", requireModAuth, async (req, res) => {
   try {
     await playfab.banPlayer(req.params.id, req.body?.reason);
+    statsStore.recordBan();
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -114,6 +128,7 @@ app.post("/players/:id/ban", requireModAuth, async (req, res) => {
 app.post("/players/:id/unban", requireModAuth, async (req, res) => {
   try {
     await playfab.unbanPlayer(req.params.id);
+    statsStore.recordUnban();
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
