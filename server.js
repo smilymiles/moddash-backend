@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import * as playfab from "./playfab.js";
 import * as lobbyStore from "./lobbyStore.js";
 import * as statsStore from "./statsStore.js";
+import * as activityLog from "./activityLog.js";
 
 const app = express();
 app.use(express.json());
@@ -33,9 +34,11 @@ app.post("/auth/login", async (req, res) => {
     }
 
     const token = jwt.sign({ playFabId }, process.env.JWT_SECRET, { expiresIn: "8h" });
+    activityLog.record("login", { modId: playFabId });
     res.json({ token });
   } catch (err) {
     console.error(err);
+    activityLog.record("error", { detail: `Login failed: ${err.message}` });
     res.status(500).json({ error: "Login failed" });
   }
 });
@@ -86,6 +89,18 @@ app.post("/stats/seed", requireModAuth, (req, res) => {
   res.json(statsStore.getCounts());
 });
 
+// PlayFab CloudScript "player purchased item" / "currency granted" events can
+// call this (via an HTTP action or a small relay in CloudScript) so purchases
+// show up in the activity log too. Same shared-secret pattern as Photon.
+app.post("/webhooks/playfab", (req, res) => {
+  if (req.headers["x-webhook-secret"] !== process.env.PHOTON_WEBHOOK_SECRET) {
+    return res.status(401).end();
+  }
+  const { playFabId, detail } = req.body || {};
+  activityLog.record("purchase", { playFabId, detail });
+  res.status(204).end();
+});
+
 // ---------- Dashboard data ----------
 // Total/banned counts are tracked ourselves (see statsStore.js) — PlayFab's
 // GetPlayersInSegment API, which used to power this, was retired 3/31/2026.
@@ -113,14 +128,30 @@ app.get("/lobbies/:code", requireModAuth, (req, res) => {
   res.json(lobby);
 });
 
+app.get("/activity", requireModAuth, (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 100, 300);
+  res.json(activityLog.list(limit));
+});
+
 // ---------- Moderation actions ----------
 app.post("/players/:id/ban", requireModAuth, async (req, res) => {
   try {
     await playfab.banPlayer(req.params.id, req.body?.reason);
     statsStore.recordBan();
+    activityLog.record("ban", {
+      modId: req.mod.playFabId,
+      playFabId: req.params.id,
+      username: req.body?.username,
+      detail: req.body?.reason || "No reason given",
+    });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
+    activityLog.record("error", {
+      modId: req.mod?.playFabId,
+      playFabId: req.params.id,
+      detail: `Ban failed: ${err.message}`,
+    });
     res.status(500).json({ error: "Ban failed" });
   }
 });
@@ -129,9 +160,19 @@ app.post("/players/:id/unban", requireModAuth, async (req, res) => {
   try {
     await playfab.unbanPlayer(req.params.id);
     statsStore.recordUnban();
+    activityLog.record("unban", {
+      modId: req.mod.playFabId,
+      playFabId: req.params.id,
+      username: req.body?.username,
+    });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
+    activityLog.record("error", {
+      modId: req.mod?.playFabId,
+      playFabId: req.params.id,
+      detail: `Unban failed: ${err.message}`,
+    });
     res.status(500).json({ error: "Unban failed" });
   }
 });
@@ -141,9 +182,20 @@ app.post("/players/:id/unban", requireModAuth, async (req, res) => {
 app.post("/players/:id/grant-shinyrocks", requireModAuth, async (req, res) => {
   try {
     await playfab.grantCurrency(req.params.id, process.env.SHINYROCKS_CURRENCY_CODE, 10000);
+    activityLog.record("grant-currency", {
+      modId: req.mod.playFabId,
+      playFabId: req.params.id,
+      username: req.body?.username,
+      detail: "10,000 Shiny Rocks",
+    });
     res.json({ ok: true, granted: 10000 });
   } catch (err) {
     console.error(err);
+    activityLog.record("error", {
+      modId: req.mod?.playFabId,
+      playFabId: req.params.id,
+      detail: `Grant currency failed: ${err.message}`,
+    });
     res.status(500).json({ error: "Grant failed" });
   }
 });
@@ -153,9 +205,20 @@ app.post("/players/:id/cosmetics/grant", requireModAuth, async (req, res) => {
     const { itemId } = req.body;
     if (!itemId) return res.status(400).json({ error: "Missing itemId" });
     await playfab.grantCosmetic(req.params.id, itemId);
+    activityLog.record("grant-cosmetic", {
+      modId: req.mod.playFabId,
+      playFabId: req.params.id,
+      username: req.body?.username,
+      detail: itemId,
+    });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
+    activityLog.record("error", {
+      modId: req.mod?.playFabId,
+      playFabId: req.params.id,
+      detail: `Grant cosmetic failed: ${err.message}`,
+    });
     res.status(500).json({ error: "Grant cosmetic failed" });
   }
 });
@@ -165,9 +228,20 @@ app.post("/players/:id/cosmetics/revoke", requireModAuth, async (req, res) => {
     const { itemInstanceId } = req.body;
     if (!itemInstanceId) return res.status(400).json({ error: "Missing itemInstanceId" });
     await playfab.revokeCosmetic(req.params.id, itemInstanceId);
+    activityLog.record("revoke-cosmetic", {
+      modId: req.mod.playFabId,
+      playFabId: req.params.id,
+      username: req.body?.username,
+      detail: itemInstanceId,
+    });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
+    activityLog.record("error", {
+      modId: req.mod?.playFabId,
+      playFabId: req.params.id,
+      detail: `Revoke cosmetic failed: ${err.message}`,
+    });
     res.status(500).json({ error: "Revoke cosmetic failed" });
   }
 });
