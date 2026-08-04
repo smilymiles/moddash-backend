@@ -26,9 +26,11 @@ async function pfCall(path, body) {
   }
 
   if (!res.ok) {
-    const msg = data?.errorMessage || `PlayFab error on ${path}`;
+    const msg = data?.errorMessage || `PlayFab error on ${path} (HTTP ${res.status}): ${raw.slice(0, 300)}`;
     const err = new Error(msg);
     err.playfab = data;
+    err.status = res.status;
+    err.raw = raw;
     throw err;
   }
   return data.data;
