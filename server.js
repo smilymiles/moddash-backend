@@ -68,12 +68,16 @@ app.post("/webhooks/photon", (req, res) => {
 });
 
 // ---------- Dashboard data ----------
+// Segment IDs (not names) — GetPlayersInSegment requires the actual segment ID
+// from Game Manager > Players > Segments > (segment) > the ID in the URL.
+const SEGMENT_ALL_PLAYERS = "3C8EF29251C15138";
+const SEGMENT_BANNED_PLAYERS = "52CF4D0367AAAAB4";
+
 app.get("/stats", requireModAuth, async (req, res) => {
   try {
-    // Requires segments named these in PlayFab Game Manager > Players > Segments.
     const [total, banned] = await Promise.all([
-      playfab.getSegmentCount("All Players"),
-      playfab.getSegmentCount("Banned Players"),
+      playfab.getSegmentCount(SEGMENT_ALL_PLAYERS),
+      playfab.getSegmentCount(SEGMENT_BANNED_PLAYERS),
     ]);
     res.json({
       totalPlayers: total,
